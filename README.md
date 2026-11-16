@@ -8,6 +8,14 @@ adds a local dashboard for configuration, history, and testing.
 No external dependencies — plain Node.js. Ships with a CLI/TUI, a browser
 dashboard, request history, and a test suite.
 
+## Screenshots
+
+| Overview | Channels |
+|---|---|
+| ![Dashboard overview](docs/screenshots/overview.png) | ![Channel management](docs/screenshots/channels.png) |
+
+![Local playground](docs/screenshots/playground.png)
+
 ## Features
 
 - **Per-channel routing** — expose one upstream per route:
