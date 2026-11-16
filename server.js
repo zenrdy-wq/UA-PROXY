@@ -354,11 +354,15 @@ const server = http.createServer((req, res) => {
       } else if (isSse) {
         let complete = false, sawError = false;
         const observer = createSseParser(({event,data}) => {
-          if (data === '[DONE]' || ['message_stop','response.completed'].includes(event)) complete = true;
+          if (data === '[DONE]' || ['message_stop','response.completed','response.incomplete','response.failed'].includes(event)) complete = true;
           try {
             const body = JSON.parse(data);
-            if (body?.choices?.some(c => c.finish_reason) || body?.type === 'message_stop' || body?.type === 'response.completed') complete = true;
-            if (event === 'error' || body?.error) { sawError = true; activity.error(proxyRes.statusCode, body); }
+            // `response.incomplete` means the model reached a limit (for
+            // example max output tokens). That is a finished turn, not a
+            // broken stream, so it must not be recorded as a failure.
+            if (body?.choices?.some(c => c.finish_reason)
+                || ['message_stop','response.completed','response.incomplete','response.failed'].includes(body?.type)) complete = true;
+            if (event === 'error' || body?.error || body?.type === 'response.failed') { sawError = true; activity.error(proxyRes.statusCode, body); }
           } catch {}
         }, {maxFrame: SSE_FRAME_LIMIT, strict: false,
           onDrop: ({kind, bytes}) => log('warn', `  dropped oversized SSE ${kind} (${bytes} bytes) from ${route.name}${route.rest}`)});

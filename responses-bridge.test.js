@@ -118,6 +118,23 @@ const failed = runStream([
 ok(failed.some((c) => c.error && c.error.message === 'boom'), 'failed -> error chunk');
 ok(!failed.some((c) => c.choices?.[0]?.finish_reason), 'no finish on failure');
 
+// response.incomplete is a legitimate end of turn (limit reached), not an error.
+const incomplete = runStream([
+  { type: 'response.created' },
+  { type: 'response.output_text.delta', delta: 'partial' },
+  { type: 'response.incomplete', response: { status: 'incomplete', incomplete_details: { reason: 'max_output_tokens' },
+    output: [{ type: 'message', content: [{ type: 'output_text', text: 'partial' }] }],
+    usage: { input_tokens: 2, output_tokens: 9, total_tokens: 11 } } },
+]);
+ok(incomplete.some((c) => c.choices?.[0]?.finish_reason === 'length'), 'incomplete -> finish_reason length');
+ok(!incomplete.some((c) => c.error), 'incomplete is not an error');
+ok(incomplete.some((c) => c.usage && c.usage.total_tokens === 11), 'incomplete carries usage');
+const filtered = runStream([
+  { type: 'response.created' },
+  { type: 'response.incomplete', response: { incomplete_details: { reason: 'content_filter' }, output: [] } },
+]);
+ok(filtered.some((c) => c.choices?.[0]?.finish_reason === 'content_filter'), 'content_filter reason mapped');
+
 // truncated stream (end without completed) still terminates cleanly
 const trunc = runStream([{ type: 'response.created' }, { type: 'response.output_text.delta', delta: 'partial' }]);
 ok(trunc.some((c) => c.choices?.[0]?.finish_reason === 'stop'), 'truncated stream gets stop');

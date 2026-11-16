@@ -165,7 +165,9 @@ function collectOutput(output) {
 
 function finishReason(response, toolCalls) {
   if (toolCalls.length) return 'tool_calls';
-  if (response?.incomplete_details?.reason === 'max_output_tokens') return 'length';
+  const reason = response?.incomplete_details?.reason;
+  if (reason === 'max_output_tokens') return 'length';
+  if (reason === 'content_filter') return 'content_filter';
   return 'stop';
 }
 
@@ -236,6 +238,18 @@ function createStreamTranslator({ model, includeUsage = true, write, onEvent = (
     }
   };
 
+  const finishTurn = (response) => {
+    const { toolCalls } = collectOutput(response?.output);
+    if (!started) { started = true; chunk({ role: 'assistant', content: '' }); }
+    chunk({}, finishReason(response, toolCalls));
+    if (includeUsage) {
+      const usage = mapUsage(response?.usage);
+      if (usage) write('data: ' + JSON.stringify({ ...base, choices: [], usage }) + '\n\n');
+    }
+    emitDone();
+    onEvent('completed');
+  };
+
   const handlers = {
     'response.created'() {
       if (started) return;
@@ -252,17 +266,10 @@ function createStreamTranslator({ model, includeUsage = true, write, onEvent = (
       chunk({ tool_calls: [{ index: toolIndexFor(item), function: { arguments: evt.delta || '' } }] });
     },
     'response.function_call_arguments.done': () => {},
-    'response.completed': (evt) => {
-      const { toolCalls } = collectOutput(evt.response?.output);
-      if (!started) { started = true; chunk({ role: 'assistant', content: '' }); }
-      chunk({}, finishReason(evt.response, toolCalls));
-      if (includeUsage) {
-        const usage = mapUsage(evt.response?.usage);
-        if (usage) write('data: ' + JSON.stringify({ ...base, choices: [], usage }) + '\n\n');
-      }
-      emitDone();
-      onEvent('completed');
-    },
+    // Both are legitimate ends of a turn: `response.incomplete` is used
+    // when a limit is reached (e.g. max output tokens).
+    'response.completed': (evt) => finishTurn(evt.response),
+    'response.incomplete': (evt) => finishTurn(evt.response),
     'response.failed': (evt) => {
       const err = evt.response?.error || {};
       write('data: ' + JSON.stringify({
