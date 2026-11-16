@@ -1,0 +1,1 @@
+TUI PTY checks passed: navigation, provider details, secret input masking, cancel, sidebar focus, clean exit.

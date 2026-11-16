@@ -1,0 +1,17 @@
+config.json
+config.json.bak
+*.log
+*.pid
+cloudflared
+runtime/
+backup-path
+qa/node_modules/
+qa/*.png
+
+remote-credentials.json
+Funnel.Caddyfile
+caddy-funnel
+funnel-backup-path
+
+channels-backup-path
+upgrade-backup-path

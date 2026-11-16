@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+# ua-proxy control script: start | stop | restart | status | logs
+set -euo pipefail
+
+DIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+PID_FILE="$DIR/ua-proxy.pid"
+LOG_FILE="$DIR/ua-proxy.log"
+
+running() {
+  /usr/bin/systemctl is-active --quiet ua-proxy.service
+}
+
+config_path() {
+  printf '%s\n' "${UA_PROXY_CONFIG:-$DIR/config.json}"
+}
+
+port() {
+  node -e "const fs=require('fs');const c=JSON.parse(fs.readFileSync(process.argv[1]));process.stdout.write(String(c.port||8787))" "$(config_path)"
+}
+
+# The installed services are the single process owner. Keep tunnel commands
+# available explicitly, but never start a tunnel as part of dashboard startup.
+case "${1:-status}" in
+  start|stop|restart)
+    exec /usr/bin/systemctl "$1" ua-proxy.service
+    ;;
+  status)
+    /usr/bin/systemctl --no-pager status ua-proxy.service ua-proxy-dashboard.service
+    exit $?
+    ;;
+  logs)
+    exec /usr/bin/journalctl -u ua-proxy.service -n "${2:-40}" --no-pager
+    ;;
+  dashboard)
+    exec /usr/local/bin/google-chrome http://127.0.0.1:8788
+    ;;
+  validate)
+    node -e "require(process.argv[1]).loadConfig(); console.log('Configuration valid')" "$DIR/config-store.js"
+    exit $?
+    ;;
+esac
+
+case "${1:-status}" in
+  tui)
+    exec node "$DIR/tui.js"
+    ;;
+
+  tunnel)
+    # Validate public config before starting anything.
+    if ! node -e "const fs=require('fs');const c=JSON.parse(fs.readFileSync(process.argv[1]));if(!c.publicMode||!c.authToken||c.authToken.startsWith('REPLACE_')||c.authToken.length<32)process.exit(1);if(!Object.values(c.upstreams||{}).some(u=>u.apiKey))process.exit(1)" "$(config_path)" 2>/dev/null; then
+        echo "REFUSED: publicMode/authToken/apiKey config invalid." >&2
+      echo "Set publicMode=true, a random authToken, and at least one upstream apiKey." >&2
+      exit 1
+    fi
+    if running; then
+      "$0" restart
+    else
+      "$0" start
+    fi
+    TUNNEL_PID_FILE="$DIR/cloudflared.pid"
+    if [[ -f "$TUNNEL_PID_FILE" ]] && [[ "$(cat "$TUNNEL_PID_FILE")" =~ ^[1-9][0-9]*$ ]] \
+      && kill -0 "$(cat "$TUNNEL_PID_FILE")" 2>/dev/null \
+      && [[ "$(tr '\0' ' ' < "/proc/$(cat "$TUNNEL_PID_FILE")/cmdline" 2>/dev/null || true)" == *"$DIR/cloudflared"* ]]; then
+      echo "tunnel already running. Log: $DIR/tunnel.log"
+      grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' "$DIR/tunnel.log" 2>/dev/null | tail -1
+      exit 0
+    fi
+    echo "starting cloudflared quick tunnel..."
+    setsid "$DIR/cloudflared" tunnel --no-autoupdate \
+      --url "http://127.0.0.1:$(port)" > "$DIR/tunnel.log" 2>&1 < /dev/null &
+    echo $! > "$TUNNEL_PID_FILE"
+    echo "waiting for the Cloudflare URL..."
+    url=""
+    for _ in $(seq 1 30); do
+      sleep 1
+      url="$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' "$DIR/tunnel.log" 2>/dev/null | tail -1)"
+      [[ -n "$url" ]] && break
+    done
+    if [[ -z "$url" ]]; then
+      p="$(cat "$TUNNEL_PID_FILE" 2>/dev/null || true)"
+      [[ "$p" =~ ^[1-9][0-9]*$ ]] && kill "$p" 2>/dev/null || true
+      rm -f "$TUNNEL_PID_FILE"
+      echo "FAILED: no URL after 30 seconds. Last log lines:" >&2
+      tail -n 15 "$DIR/tunnel.log" >&2
+      exit 1
+    fi
+    echo "TUNNEL ACTIVE: $url"
+    echo "  health  : $url/_health"
+    echo "  default : $url/v1"
+    echo "  channel : $url/<channel>/v1"
+    echo "  (send Authorization: Bearer <authToken>)"
+    echo "  log     : $DIR/tunnel.log"
+    ;;
+
+  tunnel-stop)
+    TUNNEL_PID_FILE="$DIR/cloudflared.pid"
+    if [[ -f "$TUNNEL_PID_FILE" ]]; then
+      p="$(cat "$TUNNEL_PID_FILE")"
+      if [[ "$p" =~ ^[1-9][0-9]*$ ]] && kill -0 "$p" 2>/dev/null \
+        && [[ "$(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null || true)" == *"$DIR/cloudflared"* ]]; then
+        kill "$p" 2>/dev/null
+        for _ in $(seq 1 30); do kill -0 "$p" 2>/dev/null || break; sleep 0.2; done
+        if kill -0 "$p" 2>/dev/null; then
+          kill -KILL "$p" 2>/dev/null || true
+          sleep 0.2
+        fi
+        if kill -0 "$p" 2>/dev/null; then
+          echo "tunnel did not stop" >&2
+          exit 1
+        fi
+        echo "tunnel $p stopped"
+      fi
+      rm -f "$TUNNEL_PID_FILE"
+    else
+      echo "tunnel is not running"
+    fi
+    ;;
+
+
+  token)
+    echo "authToken lives in config.json; do not print it in a public shell." >&2
+    exit 1
+    ;;
+
+  *)
+    echo "usage: $0 {tui|dashboard|start|stop|restart|status|validate|logs [n]|tunnel|tunnel-stop}" >&2
+    exit 2
+    ;;
+esac

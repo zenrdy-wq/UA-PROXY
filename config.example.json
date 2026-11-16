@@ -1,0 +1,22 @@
+{
+  "host": "127.0.0.1",
+  "port": 8787,
+  "logLevel": "info",
+  "heartbeatMs": 20000,
+  "publicMode": false,
+  "defaultUpstream": "provider-a",
+  "upstreams": {
+    "provider-a": {
+      "baseUrl": "https://api.example.com/v1",
+      "headers": {
+        "user-agent": "ua-proxy/1.0",
+        "originator": "cli"
+      },
+      "injectSessionHeaders": true,
+      "chatVia": "responses",
+      "apiKey": "REPLACE_WITH_PROVIDER_KEY"
+    }
+  },
+  "authToken": "REPLACE_WITH_32_CHAR_PROXY_TOKEN",
+  "accessRevoked": false
+}
