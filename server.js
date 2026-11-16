@@ -17,7 +17,7 @@ const https = require('node:https');
 const crypto = require('node:crypto');
 const { URL } = require('node:url');
 const telemetry = require('./telemetry').createTelemetry(process.env.UA_PROXY_METRICS);
-const { createSseParser } = require('./sse');
+const { createSseParser, SSE_FRAME_LIMIT } = require('./sse');
 
 const {
   loadConfig, resolveRoute, joinPath, buildHeaders, log, setConfig,
@@ -266,6 +266,7 @@ const server = http.createServer((req, res) => {
           res,
           heartbeat,
           activity,
+          onDrop: ({ kind, bytes }) => log('warn', `  dropped oversized SSE ${kind} (${bytes} bytes) from ${route.name}${route.rest}`),
         });
         proxyRes.on('data', (chunk) => bridged.push(chunk));
         proxyRes.on('end', () => bridged.end());
@@ -293,7 +294,7 @@ const server = http.createServer((req, res) => {
                 const evt = JSON.parse(data);
                 if (evt?.type === 'response.completed') response = evt.response;
               } catch { /* ignore malformed events */ }
-            }, { maxFrame: 32768, strict: false });
+            }, { maxFrame: SSE_FRAME_LIMIT, strict: false });
             parser.push(raw);
             parser.end();
             if (response) { respondJson(responsesToChat(response, bridge.model)); return; }
@@ -359,7 +360,8 @@ const server = http.createServer((req, res) => {
             if (body?.choices?.some(c => c.finish_reason) || body?.type === 'message_stop' || body?.type === 'response.completed') complete = true;
             if (event === 'error' || body?.error) { sawError = true; activity.error(proxyRes.statusCode, body); }
           } catch {}
-        }, {maxFrame: 32768, strict: false});
+        }, {maxFrame: SSE_FRAME_LIMIT, strict: false,
+          onDrop: ({kind, bytes}) => log('warn', `  dropped oversized SSE ${kind} (${bytes} bytes) from ${route.name}${route.rest}`)});
         proxyRes.on('data', chunk => observer.push(chunk));
         proxyRes.on('end', () => {
           observer.end();

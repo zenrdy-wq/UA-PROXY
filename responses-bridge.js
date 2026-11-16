@@ -12,7 +12,7 @@
  */
 
 const { randomUUID } = require('node:crypto');
-const { createSseParser } = require('./sse');
+const { createSseParser, SSE_FRAME_LIMIT } = require('./sse');
 
 // ---------------- request: chat/completions -> responses ----------------
 
@@ -302,7 +302,7 @@ function createStreamTranslator({ model, includeUsage = true, write, onEvent = (
  * Wire an upstream Responses SSE stream to a chat/completions client response.
  * Returns push(chunk) / end() and keeps a heartbeat alive between events.
  */
-function createBridgedStream({ model, includeUsage, res, heartbeat, activity }) {
+function createBridgedStream({ model, includeUsage, res, heartbeat, activity, onDrop = null }) {
   let completed = false;
   const translator = createStreamTranslator({
     model,
@@ -313,7 +313,7 @@ function createBridgedStream({ model, includeUsage, res, heartbeat, activity }) 
   const parser = createSseParser(({ data }) => {
     if (data === '[DONE]' || data === 'null') return;
     translator.event(data);
-  }, { maxFrame: 32768, strict: false });
+  }, { maxFrame: SSE_FRAME_LIMIT, strict: false, onDrop });
   return {
     push(chunk) { heartbeat.touch(); parser.push(chunk); },
     end() {
