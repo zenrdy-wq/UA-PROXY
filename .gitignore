@@ -5,7 +5,7 @@ config.json.bak
 cloudflared
 runtime/
 backup-path
-qa/node_modules/
+qa/node_modules
 qa/*.png
 
 remote-credentials.json

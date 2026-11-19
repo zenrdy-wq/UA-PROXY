@@ -143,6 +143,10 @@ async function perform(action, input = {}) {
       if (/auth|token|key|cookie|secret/i.test(k) && !Object.hasOwn(next.headers, k)) next.headers[k] = v;
     }
     if (input.stripBodyKeys !== undefined) next.stripBodyKeys = input.stripBodyKeys;
+    if (input.chatVia !== undefined) {
+      if (input.chatVia === 'responses') next.chatVia = 'responses';
+      else delete next.chatVia;
+    }
     if (input.heartbeatMs === '' || input.heartbeatMs === null) delete next.heartbeatMs;
     else if (input.heartbeatMs !== undefined) next.heartbeatMs = Number(input.heartbeatMs);
     cfg.upstreams[name] = next;
